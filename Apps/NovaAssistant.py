@@ -4,7 +4,12 @@ import os
 import subprocess
 import sys
 import time
+import warnings
 import webbrowser
+
+# Mute urllib3 LibreSSL warnings on macOS
+warnings.filterwarnings("ignore")
+
 import requests
 import speech_recognition as sr
 import wikipedia
@@ -82,6 +87,13 @@ if __name__ == "__main__":
             speak("Your voice assistant Nova is shutting down. Good bye!")
             break
 
+        # Casual Conversations & Greetings
+        elif any(w in statement for w in ["hello", "hi", "hey"]):
+            speak("Hello! How can I assist you today?")
+
+        elif "how are you" in statement:
+            speak("I'm doing great, thank you for asking! How are you doing?")
+
         # Wikipedia Search
         elif "wikipedia" in statement:
             speak("Searching Wikipedia...")
@@ -155,7 +167,7 @@ if __name__ == "__main__":
             else:
                 speak("Camera module ecapture is not configured on this machine.")
 
-        # General Search
+        # General Google Search
         elif "search" in statement:
             query = statement.replace("search", "").strip()
             webbrowser.open_new_tab(f"https://www.google.com/search?q={query}")
@@ -177,7 +189,7 @@ if __name__ == "__main__":
         # Log off / macOS Logout
         elif "log off" in statement or "sign out" in statement:
             speak("Signing out now.")
-            if sys.platform == "darwin":  # macOS support
+            if sys.platform == "darwin":
                 subprocess.call(["osascript", "-e", 'tell app "System Events" to log out'])
-            else:  # Windows support
+            else:
                 subprocess.call(["shutdown", "/l"])
