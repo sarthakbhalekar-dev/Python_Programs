@@ -1,195 +1,340 @@
+
 import datetime
-import json
-import os
+import random
 import subprocess
 import sys
-import time
-import warnings
 import webbrowser
+from pathlib import Path
+from urllib.parse import quote_plus
 
-# Mute urllib3 LibreSSL warnings on macOS
-warnings.filterwarnings("ignore")
-
-import requests
+import pyttsx3
 import speech_recognition as sr
-import wikipedia
-import wolframalpha
 
-# Optional module for camera capture
-try:
-    from ecapture import ecapture as ec
-except ImportError:
-    ec = None
 
-# Loading Voice Engine safely
-print("Loading Your Personal Voice Assistant, Nova...")
+# ---------- SETUP ----------
+
+engine = None
 
 try:
-    import pyttsx3
     engine = pyttsx3.init()
-    engine.setProperty("rate", 190)
-    voices = engine.getProperty("voices")
-    if len(voices) > 1:
-        engine.setProperty("voice", voices[1].id)
-    elif len(voices) > 0:
-        engine.setProperty("voice", voices[0].id)
-except Exception as e:
-    print(f"Warning: TTS Engine init issue: {e}")
-    engine = None
+    engine.setProperty("rate", 180)
+except Exception as error:
+    print("Voice output unavailable:", error)
+
+recognizer = sr.Recognizer()
+notes_file = Path(__file__).with_name("nova_notes.txt")
 
 
-def speak(text):
-    print(f"Nova: {text}")
-    if engine:
-        engine.say(text)
-        engine.runAndWait()
+# ---------- SPEAK ----------
 
+def speak(message):
+    print("Nova:", message)
 
-def wishMe():
-    hour = datetime.datetime.now().hour
-    if 0 <= hour < 12:
-        speak("Hello, Good Morning! I'm your personal assistant, Nova.")
-    elif 12 <= hour < 18:
-        speak("Hello, Good Afternoon! I'm your personal assistant, Nova.")
-    else:
-        speak("Hello, Good Evening! I'm your personal assistant, Nova.")
-
-
-def takeCommand():
-    r = sr.Recognizer()
-    with sr.Microphone() as source:
-        print("Listening...")
-        r.adjust_for_ambient_noise(source, duration=0.5)
-        audio = r.listen(source)
-
+    if engine is not None:
         try:
-            statement = r.recognize_google(audio, language="en-in")
-            print(f"User Said: {statement}\n")
-        except Exception:
-            speak("Pardon me, could you please speak again?")
-            return "none"
-        return statement.lower()
+            engine.say(message)
+            engine.runAndWait()
+        except Exception as error:
+            print("Speech error:", error)
 
 
-# Main Execution Loop
-if __name__ == "__main__":
-    wishMe()
+# ---------- LISTEN ----------
+
+def listen():
+    try:
+        with sr.Microphone() as source:
+            print("\nListening...")
+            recognizer.adjust_for_ambient_noise(
+                source, duration=0.5
+            )
+            audio = recognizer.listen(
+                source,
+                timeout=5,
+                phrase_time_limit=8
+            )
+
+        command = recognizer.recognize_google(audio)
+        print("You:", command)
+        return command.lower().strip()
+
+    except sr.WaitTimeoutError:
+        print("No speech detected.")
+
+    except sr.UnknownValueError:
+        print("Couldn't understand your voice.")
+
+    except sr.RequestError:
+        print("Speech recognition needs internet access.")
+
+    except (OSError, AttributeError) as error:
+        print("Microphone error:", error)
+
+    return ""
+
+
+# ---------- INPUT ----------
+
+def get_command(mode):
+    if mode == "voice":
+        command = listen()
+
+        if command:
+            return command
+
+        print("Switching to keyboard for this command.")
+
+    return input("You: ").lower().strip()
+
+
+# ---------- OPEN WEBSITES ----------
+
+def open_website(name, url):
+    webbrowser.open(url)
+    speak("Opening " + name)
+
+
+# ---------- OPEN MAC APPS ----------
+
+def open_app(app_name):
+    if sys.platform != "darwin":
+        speak("This feature is designed for macOS.")
+        return
+
+    apps = {
+        "calculator": "Calculator",
+        "notes": "Notes",
+        "safari": "Safari",
+        "calendar": "Calendar",
+        "textedit": "TextEdit"
+    }
+
+    app = apps.get(app_name)
+
+    if app is None:
+        speak("I don't know that app.")
+        return
+
+    result = subprocess.run(
+        ["open", "-a", app],
+        capture_output=True,
+        text=True
+    )
+
+    if result.returncode == 0:
+        speak("Opening " + app)
+    else:
+        speak("I couldn't open " + app)
+
+
+# ---------- SAVE NOTES ----------
+
+def save_note(note):
+    if not note:
+        speak("There is nothing to save.")
+        return
+
+    timestamp = datetime.datetime.now().strftime(
+        "%Y-%m-%d %H:%M"
+    )
+
+    with open(notes_file, "a", encoding="utf-8") as file:
+        file.write(f"[{timestamp}] {note}\n")
+
+    speak("Your note has been saved.")
+
+
+# ---------- COMMANDS ----------
+
+def handle_command(command):
+    if not command:
+        return True
+
+    # Exit
+    if command in ["bye", "goodbye", "stop", "exit", "quit"]:
+        speak("Goodbye! See you later.")
+        return False
+
+    # Greetings
+    elif command in ["hello", "hi", "hey", "hello nova"]:
+        speak("Hello! How can I help you?")
+
+    elif "how are you" in command:
+        speak("I'm doing great! Thanks for asking.")
+
+    # Time and date
+    elif "time" in command:
+        now = datetime.datetime.now().strftime("%I:%M %p")
+        speak("The time is " + now)
+
+    elif "date" in command or "what day" in command:
+        today = datetime.datetime.now().strftime(
+            "%A, %d %B %Y"
+        )
+        speak("Today is " + today)
+
+    # Websites
+    elif "youtube" in command:
+        open_website(
+            "YouTube",
+            "https://www.youtube.com"
+        )
+
+    elif "gmail" in command:
+        open_website(
+            "Gmail",
+            "https://mail.google.com"
+        )
+
+    elif "wikipedia" in command:
+        open_website(
+            "Wikipedia",
+            "https://www.wikipedia.org"
+        )
+
+    elif "google" in command and "search" not in command:
+        open_website(
+            "Google",
+            "https://www.google.com"
+        )
+
+    # Weather
+    elif "weather" in command:
+        city = input("Enter city: ").strip()
+
+        if city:
+            url = (
+                "https://www.google.com/search?q="
+                + quote_plus("weather in " + city)
+            )
+            open_website("weather for " + city, url)
+        else:
+            speak("No city was entered.")
+
+    # Web search
+    elif command.startswith("search "):
+        query = command[7:].strip()
+
+        if query:
+            url = (
+                "https://www.google.com/search?q="
+                + quote_plus(query)
+            )
+            open_website("search results", url)
+        else:
+            speak("Please give me something to search.")
+
+    # Mac applications
+    elif command.startswith("open "):
+        app_name = command[5:].strip()
+        open_app(app_name)
+
+    # Notes
+    elif command.startswith("note "):
+        save_note(command[5:].strip())
+
+    elif command in ["read notes", "show notes"]:
+        if notes_file.exists():
+            content = notes_file.read_text(
+                encoding="utf-8"
+            )
+            print("\n--- YOUR NOTES ---")
+            print(content)
+            print("------------------\n")
+            speak("I've displayed your notes.")
+        else:
+            speak("You haven't saved any notes yet.")
+
+    # Fun
+    elif "joke" in command:
+        jokes = [
+            "Why do programmers prefer dark mode? Because light attracts bugs!",
+            "Why did the computer get cold? It left its Windows open!",
+            "There are 10 types of people. Those who understand binary, and those who don't."
+        ]
+        speak(random.choice(jokes))
+
+    elif "flip a coin" in command:
+        speak(random.choice(["Heads!", "Tails!"]))
+
+    elif "roll a dice" in command:
+        speak("You rolled " + str(random.randint(1, 6)))
+
+    # Identity
+    elif "who are you" in command:
+        speak("I'm Nova, your Python personal assistant.")
+
+    # Help
+    elif "help" in command:
+        print("""
+AVAILABLE COMMANDS
+
+hello
+time
+date
+open youtube
+open google
+open gmail
+open wikipedia
+open calculator
+open notes
+open safari
+open calendar
+open textedit
+weather
+search Python tutorials
+note finish homework
+read notes
+tell me a joke
+flip a coin
+roll a dice
+who are you
+bye
+""")
+        speak("Here are my available commands.")
+
+    else:
+        speak("I don't know that command yet.")
+
+    return True
+
+
+# ---------- MAIN PROGRAM ----------
+
+def main():
+    hour = datetime.datetime.now().hour
+
+    if hour < 12:
+        speak("Good morning! I'm Nova.")
+    elif hour < 18:
+        speak("Good afternoon! I'm Nova.")
+    else:
+        speak("Good evening! I'm Nova.")
+
+    print("\nNOVA 2.0")
+    print("1. Voice mode")
+    print("2. Keyboard mode")
+
+    choice = input("Choose 1 or 2: ").strip()
+    mode = "voice" if choice == "1" else "keyboard"
+
+    speak("Nova is ready. Say or type help for commands.")
 
     while True:
-        speak("How may I help you now?")
-        statement = takeCommand()
+        try:
+            command = get_command(mode)
 
-        if statement == "none":
-            continue
+            if not handle_command(command):
+                break
 
-        # Exit / Shutdown Voice Loop
-        if any(w in statement for w in ["good bye", "ok bye", "stop", "exit", "quit"]):
-            speak("Your voice assistant Nova is shutting down. Good bye!")
+        except (KeyboardInterrupt, EOFError):
+            print()
+            speak("Goodbye!")
             break
 
-        # Casual Conversations & Greetings
-        elif any(w in statement for w in ["hello", "hi", "hey"]):
-            speak("Hello! How can I assist you today?")
+        except Exception as error:
+            print("Error:", error)
+            speak("Something went wrong. Please try again.")
 
-        elif "how are you" in statement:
-            speak("I'm doing great, thank you for asking! How are you doing?")
 
-        # Wikipedia Search
-        elif "wikipedia" in statement:
-            speak("Searching Wikipedia...")
-            query = statement.replace("wikipedia", "").strip()
-            try:
-                results = wikipedia.summary(query, sentences=2)
-                speak("According to Wikipedia...")
-                speak(results)
-            except Exception:
-                speak("Sorry, I couldn't find relevant information on Wikipedia.")
-
-        # Quick Browser Launcher
-        elif "open youtube" in statement:
-            webbrowser.open_new_tab("https://www.youtube.com")
-            speak("YouTube is open now.")
-
-        elif "open google" in statement:
-            webbrowser.open_new_tab("https://www.google.com")
-            speak("Google is open now.")
-
-        elif "open gmail" in statement:
-            webbrowser.open_new_tab("https://www.gmail.com")
-            speak("Gmail is open now.")
-
-        elif "open stackoverflow" in statement:
-            webbrowser.open_new_tab("https://stackoverflow.com")
-            speak("Stack Overflow is open now.")
-
-        # Weather Forecast (Metric Units)
-        elif "weather" in statement:
-            api_key = "8ef61edcf1c576d65d836254e11ea420"
-            speak("What is the name of the city?")
-            city_name = takeCommand()
-            
-            if city_name != "none":
-                url = f"https://api.openweathermap.org/data/2.5/weather?q={city_name}&appid={api_key}&units=metric"
-                try:
-                    res = requests.get(url).json()
-                    if res.get("cod") != "404":
-                        temp = res["main"]["temp"]
-                        humidity = res["main"]["humidity"]
-                        desc = res["weather"][0]["description"]
-                        speak(f"The temperature in {city_name} is {temp} degrees Celsius with {desc} and {humidity} percent humidity.")
-                    else:
-                        speak("City not found. Please try again.")
-                except Exception:
-                    speak("Unable to retrieve weather data right now.")
-
-        # Current Time
-        elif "time" in statement:
-            strTime = datetime.datetime.now().strftime("%I:%M %p")
-            speak(f"The time is {strTime}")
-
-        # Identity Checks
-        elif "who are you" in statement or "what can you do" in statement:
-            speak("My name is Nova. I am your assistant built in Python to open apps, check weather, tell time, and search the web.")
-
-        elif "who made you" in statement or "who created you" in statement:
-            speak("I was built by RayLight!")
-
-        # News Search
-        elif "news" in statement:
-            webbrowser.open_new_tab("https://timesofindia.indiatimes.com/home/headlines")
-            speak("Here are the latest headlines from Times of India.")
-
-        # Camera Integration
-        elif "camera" in statement or "take a photo" in statement:
-            if ec:
-                ec.capture(0, "Nova Camera", "img.jpg")
-                speak("Photo captured successfully.")
-            else:
-                speak("Camera module ecapture is not configured on this machine.")
-
-        # General Google Search
-        elif "search" in statement:
-            query = statement.replace("search", "").strip()
-            webbrowser.open_new_tab(f"https://www.google.com/search?q={query}")
-            speak(f"Searching Google for {query}")
-
-        # WolframAlpha Computational Questions
-        elif "ask" in statement:
-            speak("What question would you like to ask?")
-            question = takeCommand()
-            if question != "none":
-                try:
-                    client = wolframalpha.Client("R2K75H-7ELALHR35X")
-                    res = client.query(question)
-                    answer = next(res.results).text
-                    speak(answer)
-                except Exception:
-                    speak("Sorry, I couldn't get an answer for that query.")
-
-        # Log off / macOS Logout
-        elif "log off" in statement or "sign out" in statement:
-            speak("Signing out now.")
-            if sys.platform == "darwin":
-                subprocess.call(["osascript", "-e", 'tell app "System Events" to log out'])
-            else:
-                subprocess.call(["shutdown", "/l"])
+if __name__ == "__main__":
+    main()

@@ -1,17 +1,30 @@
-user_pin = 1234
-user_name = "Sarthak"
 
-enter_name = input("Please Enter Your Username: ").strip()
+import getpass
 
-if enter_name == user_name:
-    print("Username Verified Successfully.")
-    
-    enter_pin = int(input("Please Enter Your PIN: "))
-    
-    if enter_pin == user_pin:
-        print("PIN Is Correct.")
-        print("Logged In Successfully!")
+# Login details (for practice only)
+username = "Sarthak"
+pin = "1234"
+
+attempts = 3
+
+print("===== LOGIN SYSTEM =====")
+
+while attempts > 0:
+    enter_name = input("Enter Username: ").strip()
+    enter_pin = getpass.getpass("Enter PIN: ")
+
+    if enter_name.lower() == username.lower() and enter_pin == pin:
+        print("\nUsername and PIN verified!")
+        print("Login Successful! Welcome,", username)
+        break
+
     else:
-        print("PIN Is Incorrect! Access Denied.")
-else:
-    print("Username Invalid! Please Try Again.")
+        attempts -= 1
+        print("\nIncorrect username or PIN.")
+
+        if attempts > 0:
+            print("Attempts remaining:", attempts)
+        else:
+            print("Access Denied! Too many attempts.")
+
+print("===== SESSION ENDED =====")

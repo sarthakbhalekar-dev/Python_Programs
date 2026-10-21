@@ -1,112 +1,158 @@
-import os
-import requests
+
 import tkinter as tk
+from tkinter import ttk
+import requests
+import threading
+from urllib.parse import quote
 
-# Silence macOS Tkinter deprecation warning
-os.environ['TK_SILENCE_DEPRECATION'] = '1'
 
+# Get weather information
+def get_weather():
+    city = city_entry.get().strip()
 
-def get_weather(event=None):
-    city = text_field.get().strip()
     if not city:
+        result_label.config(text="Please enter a city!")
         return
 
-    # Visual feedback while fetching
-    label1.config(text="Loading...")
-    label2.config(text="")
-    canvas.update_idletasks()
+    search_button.config(state="disabled")
+    result_label.config(text="Loading weather...")
+    details_label.config(text="")
 
-    # Keyless wttr.in JSON endpoint
-    url = f"https://wttr.in/{city}?format=j1"
+    # Run the request without freezing the window
+    threading.Thread(
+        target=fetch_weather,
+        args=(city,),
+        daemon=True
+    ).start()
 
+
+def fetch_weather(city):
     try:
-        response = requests.get(url, timeout=5)
-        if response.status_code != 200:
-            label1.config(text="Error")
-            label2.config(text=f"City '{city}' not found!")
-            return
+        url = f"https://wttr.in/{quote(city, safe='')}?format=j1"
+        response = requests.get(url, timeout=10)
+        response.raise_for_status()
 
-        json_data = response.json()
-        
-        # Check if wttr.in returned valid weather data
-        if 'current_condition' not in json_data:
-            label1.config(text="Not Found")
-            label2.config(text=f"Could not find weather for '{city}'")
-            return
+        data = response.json()
 
-        current = json_data['current_condition'][0]
-        weather_desc = current['weatherDesc'][0]['value']
-        temp = current['temp_C']
-        humidity = current['humidity']
-        wind = current['windspeedKmph']
-        pressure = current['pressure']
+        current = data["current_condition"][0]
+        astronomy = data["weather"][0]["astronomy"][0]
 
-        astronomy = json_data['weather'][0]['astronomy'][0]
-        sunrise = astronomy['sunrise']
-        sunset = astronomy['sunset']
+        description = current["weatherDesc"][0]["value"]
+        temperature = current["temp_C"]
+        feels_like = current["FeelsLikeC"]
+        humidity = current["humidity"]
+        wind = current["windspeedKmph"]
+        pressure = current["pressure"]
 
-        final_info = f"{weather_desc}\n{temp}°C"
-        final_data = (
+        sunrise = astronomy["sunrise"]
+        sunset = astronomy["sunset"]
+
+        summary = f"{city.title()}\n{temperature}°C\n{description}"
+
+        details = (
+            f"Feels Like: {feels_like}°C\n"
             f"Humidity: {humidity}%\n"
-            f"Wind Speed: {wind} km/h\n"
+            f"Wind: {wind} km/h\n"
             f"Pressure: {pressure} hPa\n"
             f"Sunrise: {sunrise}\n"
             f"Sunset: {sunset}"
         )
-        label1.config(text=final_info)
-        label2.config(text=final_data)
 
-    except requests.exceptions.RequestException:
-        label1.config(text="Error")
-        label2.config(text="Connection Error. Check internet!")
-    except Exception:
-        label1.config(text="Error")
-        label2.config(text="Unable to process weather data")
+        root.after(0, lambda: show_result(summary, details))
+
+    except (requests.RequestException, ValueError, KeyError, IndexError):
+        root.after(
+            0,
+            lambda: show_result(
+                "Weather unavailable",
+                "Check the city name or internet connection."
+            )
+        )
 
 
-# Main Window Setup
-canvas = tk.Tk()
-canvas.geometry("500x550")
-canvas.title("Weather App")
-canvas.config(bg="#1E1E24")  # Modern dark background
+def show_result(summary, details):
+    result_label.config(text=summary)
+    details_label.config(text=details)
+    search_button.config(state="normal")
 
-# Fonts
-f_small = ("poppins", 13, "normal")
-f_medium = ("poppins", 18, "bold")
-f_large = ("poppins", 28, "bold")
 
-# Input Field
-text_field = tk.Entry(
-    canvas,
-    justify='center',
-    width=18,
-    font=f_medium,
-    bg="#2D2D3A",
-    fg="#FFFFFF",
-    insertbackground="#FFFFFF",  # Cursor color
-    relief="flat"
+# Main window
+root = tk.Tk()
+root.title("Weather App")
+root.geometry("450x540")
+root.configure(bg="#171923")
+root.resizable(False, False)
+
+# Title
+title_label = tk.Label(
+    root,
+    text="☁ Weather App",
+    font=("Arial", 24, "bold"),
+    bg="#171923",
+    fg="white"
 )
-text_field.pack(pady=(25, 10))
-text_field.focus()
-text_field.bind('<Return>', get_weather)
+title_label.pack(pady=(25, 10))
 
-# Search Button
-search_btn = tk.Button(
-    canvas,
+# City input
+city_entry = tk.Entry(
+    root,
+    font=("Arial", 16),
+    justify="center",
+    bg="#292D3E",
+    fg="white",
+    insertbackground="white",
+    relief="flat",
+    width=25
+)
+city_entry.pack(pady=12, ipady=10)
+city_entry.focus()
+
+# Search button
+search_button = tk.Button(
+    root,
     text="Get Weather",
-    font=("poppins", 11, "bold"),
+    font=("Arial", 13, "bold"),
+    bg="#00B8D9",
+    fg="black",
     command=get_weather,
-    highlightbackground="#1E1E24"
+    relief="flat",
+    padx=20,
+    pady=8
 )
-search_btn.pack(pady=5)
+search_button.pack(pady=8)
 
-# Main Temp & Status Label
-label1 = tk.Label(canvas, font=f_large, bg="#1E1E24", fg="#00D2FF")
-label1.pack(pady=20)
+city_entry.bind("<Return>", lambda event: get_weather())
 
-# Detailed Stats Label
-label2 = tk.Label(canvas, font=f_small, justify='center', bg="#1E1E24", fg="#E0E0E0")
-label2.pack(pady=10)
+# Weather result
+result_label = tk.Label(
+    root,
+    text="Enter a city to get started",
+    font=("Arial", 23, "bold"),
+    bg="#171923",
+    fg="#59D8F7",
+    justify="center"
+)
+result_label.pack(pady=(25, 12))
 
-if __name__ == "__main__":
-    canvas.mainloop()
+# Weather details
+details_label = tk.Label(
+    root,
+    text="",
+    font=("Arial", 13),
+    bg="#171923",
+    fg="#E5E7EB",
+    justify="center"
+)
+details_label.pack(pady=10)
+
+# Footer
+footer_label = tk.Label(
+    root,
+    text="Weather data: wttr.in",
+    font=("Arial", 10),
+    bg="#171923",
+    fg="#9CA3AF"
+)
+footer_label.pack(side="bottom", pady=15)
+
+root.mainloop()

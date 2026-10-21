@@ -1,251 +1,252 @@
-import os
+
 import sys
+from urllib.parse import quote_plus
 
-# macOS QtWebEngine compatibility flags
-os.environ["QTWEBENGINE_DISABLE_SANDBOX"] = "1"
-os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = "--no-sandbox --disable-gpu"
-
-from PyQt5.QtCore import QUrl, QSize
-from PyQt5.QtGui import QIcon
+from PyQt5.QtCore import QUrl
 from PyQt5.QtWidgets import (
-    QApplication, QMainWindow, QTabWidget, QToolBar,
-    QLineEdit, QAction, QStyle, QLabel, QWidget, QVBoxLayout
+    QApplication, QMainWindow, QTabWidget,
+    QToolBar, QLineEdit, QAction, QLabel
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView
 
 
 class VortexBrowser(QMainWindow):
+
     def __init__(self):
         super().__init__()
+
         self.setWindowTitle("Vortex Browser")
         self.resize(1200, 800)
 
-        style = self.style()
-
-        # Layout Container for Multiple Toolbars & Central View
-        central_widget = QWidget()
-        self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # Tab Widget Setup
+        # Tabs
         self.tabs = QTabWidget()
-        self.tabs.setDocumentMode(True)
         self.tabs.setTabsClosable(True)
+        self.tabs.setDocumentMode(True)
         self.tabs.tabCloseRequested.connect(self.close_tab)
-        self.tabs.currentChanged.connect(self.tab_changed)
+        self.tabs.currentChanged.connect(self.update_address)
 
-        # Navigation Toolbar
-        nav = QToolBar("Navigation")
-        nav.setIconSize(QSize(18, 18))
-        nav.setMovable(False)
-        self.addToolBar(nav)
+        self.setCentralWidget(self.tabs)
 
-        # Action Buttons
-        back_btn = QAction(style.standardIcon(QStyle.SP_ArrowLeft), "", self)
-        back_btn.setToolTip("Back")
-        back_btn.triggered.connect(lambda: self.current_browser().back() if self.current_browser() else None)
-        nav.addAction(back_btn)
+        # Navigation bar
+        toolbar = QToolBar("Navigation")
+        self.addToolBar(toolbar)
 
-        next_btn = QAction(style.standardIcon(QStyle.SP_ArrowRight), "", self)
-        next_btn.setToolTip("Forward")
-        next_btn.triggered.connect(lambda: self.current_browser().forward() if self.current_browser() else None)
-        nav.addAction(next_btn)
+        self.add_button(toolbar, "←", self.go_back)
+        self.add_button(toolbar, "→", self.go_forward)
+        self.add_button(toolbar, "⟳", self.reload_page)
+        self.add_button(toolbar, "⌂", self.go_home)
 
-        reload_btn = QAction(style.standardIcon(QStyle.SP_BrowserReload), "", self)
-        reload_btn.setToolTip("Reload")
-        reload_btn.triggered.connect(lambda: self.current_browser().reload() if self.current_browser() else None)
-        nav.addAction(reload_btn)
+        self.security_label = QLabel("  ")
+        toolbar.addWidget(self.security_label)
 
-        home_btn = QAction(style.standardIcon(QStyle.SP_DirHomeIcon), "", self)
-        home_btn.setToolTip("Home")
-        home_btn.triggered.connect(self.go_home)
-        nav.addAction(home_btn)
+        self.address_bar = QLineEdit()
+        self.address_bar.setPlaceholderText(
+            "Search Google or enter a website..."
+        )
+        self.address_bar.returnPressed.connect(self.navigate)
+        toolbar.addWidget(self.address_bar)
 
-        nav.addSeparator()
+        self.add_button(toolbar, "+", self.new_tab)
+        self.add_button(toolbar, "−", self.zoom_out)
+        self.add_button(toolbar, "Zoom +", self.zoom_in)
 
-        # Security Status Indicator
-        self.lock_label = QLabel()
-        self.lock_label.setStyleSheet("padding: 0 4px;")
-        nav.addWidget(self.lock_label)
+        # Bookmarks
+        bookmarks = QToolBar("Bookmarks")
+        self.addToolBar(bookmarks)
 
-        # Address / Search Bar
-        self.url_bar = QLineEdit()
-        self.url_bar.setPlaceholderText("Search Google or type a web address...")
-        self.url_bar.returnPressed.connect(self.navigate_to_url)
-        nav.addWidget(self.url_bar)
+        websites = {
+            "Google": "https://www.google.com",
+            "YouTube": "https://www.youtube.com",
+            "GitHub": "https://github.com",
+            "Wikipedia": "https://www.wikipedia.org"
+        }
 
-        nav.addSeparator()
-
-        # Zoom Controls
-        zoom_in_btn = QAction("+", self)
-        zoom_in_btn.setToolTip("Zoom In")
-        zoom_in_btn.triggered.connect(lambda: self.zoom_page(0.1))
-        nav.addAction(zoom_in_btn)
-
-        zoom_out_btn = QAction("-", self)
-        zoom_out_btn.setToolTip("Zoom Out")
-        zoom_out_btn.triggered.connect(lambda: self.zoom_page(-0.1))
-        nav.addAction(zoom_out_btn)
-
-        # New Tab Action
-        new_tab_btn = QAction(style.standardIcon(QStyle.SP_FileDialogNewFolder), "", self)
-        new_tab_btn.setToolTip("New Tab")
-        new_tab_btn.triggered.connect(lambda: self.add_tab())
-        nav.addAction(new_tab_btn)
-
-        # Bookmarks Bar
-        bookmarks_bar = QToolBar("Bookmarks")
-        bookmarks_bar.setIconSize(QSize(14, 14))
-        bookmarks_bar.setMovable(False)
-        self.addToolBar(bookmarks_bar)
-
-        bookmarks = [
-            ("Google", "https://www.google.com"),
-            ("YouTube", "https://www.youtube.com"),
-            ("GitHub", "https://www.github.com"),
-            ("Reddit", "https://www.reddit.com"),
-            ("Wikipedia", "https://www.wikipedia.org"),
-        ]
-
-        for name, url in bookmarks:
+        for name, url in websites.items():
             action = QAction(name, self)
-            action.triggered.connect(lambda checked, target=url: self.open_bookmark(target))
-            bookmarks_bar.addAction(action)
+            action.triggered.connect(
+                lambda checked=False, link=url: self.open_url(link)
+            )
+            bookmarks.addAction(action)
 
-        # Attach tabs to layout
-        main_layout.addWidget(self.tabs)
+        # Keyboard shortcuts
+        self.add_shortcut("Ctrl+T", self.new_tab)
+        self.add_shortcut("Ctrl+W", self.close_current_tab)
+        self.add_shortcut("Ctrl+L", self.address_bar.setFocus)
+        self.add_shortcut("Ctrl+R", self.reload_page)
 
-        # Dark Glass Modern UI Stylesheet
+        # Dark theme
         self.setStyleSheet("""
-            QMainWindow { background-color: #121216; }
+            QMainWindow {
+                background: #15151c;
+            }
+
             QToolBar {
-                background-color: #1A1A22;
-                border-bottom: 1px solid #282834;
-                padding: 4px 8px;
+                background: #20202b;
+                border: none;
+                padding: 6px;
                 spacing: 6px;
             }
+
             QToolButton {
-                background-color: transparent;
-                color: #D1D1D6;
-                border-radius: 6px;
-                padding: 4px 8px;
-                font-weight: 500;
-                font-size: 12px;
+                color: white;
+                background: #30303d;
+                padding: 6px;
+                border-radius: 5px;
             }
-            QToolButton:hover { 
-                background-color: #2A2A36; 
-                color: #FFFFFF;
+
+            QToolButton:hover {
+                background: #45455a;
             }
+
             QLineEdit {
-                background-color: #0B0B0E;
-                color: #FFFFFF;
-                border: 1px solid #2D2D3A;
-                border-radius: 10px;
-                padding: 5px 12px;
-                font-size: 13px;
+                background: #101018;
+                color: white;
+                border: 1px solid #45455a;
+                border-radius: 8px;
+                padding: 8px;
             }
-            QLineEdit:focus { border: 1px solid #00D2FF; background-color: #14141A; }
-            QTabWidget::pane { border: none; background-color: #121216; }
+
+            QTabWidget::pane {
+                border: none;
+            }
+
             QTabBar::tab {
-                background-color: #1A1A22;
-                color: #8E8E93;
-                padding: 8px 16px;
-                border-top-left-radius: 8px;
-                border-top-right-radius: 8px;
-                margin-right: 4px;
-                min-width: 120px;
-                font-size: 12px;
+                background: #282835;
+                color: #cccccc;
+                padding: 9px 18px;
             }
+
             QTabBar::tab:selected {
-                background-color: #121216;
-                color: #FFFFFF;
-                border-bottom: 2px solid #00D2FF;
+                background: #45455a;
+                color: white;
             }
         """)
 
-        # Initial Tab Setup
-        self.add_tab(QUrl("https://www.google.com"), "Google")
+        self.new_tab()
+
+    def add_button(self, toolbar, name, function):
+        action = QAction(name, self)
+        action.triggered.connect(function)
+        toolbar.addAction(action)
+
+    def add_shortcut(self, shortcut, function):
+        action = QAction(self)
+        action.setShortcut(shortcut)
+        action.triggered.connect(function)
+        self.addAction(action)
 
     def current_browser(self):
         return self.tabs.currentWidget()
 
-    def add_tab(self, qurl=None, label="New Tab"):
-        if not qurl or not isinstance(qurl, QUrl):
-            qurl = QUrl("https://www.google.com")
-
+    def new_tab(self):
         browser = QWebEngineView()
-        browser.setUrl(qurl)
 
-        index = self.tabs.addTab(browser, label)
+        index = self.tabs.addTab(browser, "New Tab")
         self.tabs.setCurrentIndex(index)
 
-        # Dynamic Signals for Favicon, Title, and Address Updates
-        browser.urlChanged.connect(lambda url, b=browser: self.update_urlbar(url, b))
-        browser.iconChanged.connect(lambda icon, b=browser: self.update_tab_icon(icon, b))
-        browser.loadFinished.connect(
-            lambda _, b=browser: self.tabs.setTabText(
-                self.tabs.indexOf(b), b.page().title() or "New Tab"
-            ) if self.tabs.indexOf(b) != -1 else None
+        browser.urlChanged.connect(
+            lambda url, b=browser: self.update_url(url, b)
         )
 
-    def close_tab(self, index):
-        if self.tabs.count() > 1:
-            self.tabs.removeTab(index)
+        browser.titleChanged.connect(
+            lambda title, b=browser: self.update_title(title, b)
+        )
 
-    def tab_changed(self, index):
-        browser = self.current_browser()
-        if browser:
-            self.update_urlbar(browser.url(), browser)
+        browser.setUrl(QUrl("https://www.google.com"))
 
-    def update_tab_icon(self, icon, browser):
+    def update_title(self, title, browser):
         index = self.tabs.indexOf(browser)
+
         if index != -1:
-            self.tabs.setTabIcon(index, icon)
+            self.tabs.setTabText(index, title[:20] or "New Tab")
 
-    def update_urlbar(self, qurl, browser):
+    def update_url(self, url, browser):
         if browser == self.current_browser():
-            url_str = qurl.toString()
-            self.url_bar.setText(url_str)
-            if qurl.scheme() == "https":
-                self.lock_label.setText("🔒")
-                self.lock_label.setStyleSheet("color: #2ECC71;")
-            else:
-                self.lock_label.setText("🔓")
-                self.lock_label.setStyleSheet("color: #F1C40F;")
+            self.address_bar.setText(url.toString())
 
-    def navigate_to_url(self):
-        text = self.url_bar.text().strip()
+            if url.scheme() == "https":
+                self.security_label.setText("🔒")
+            else:
+                self.security_label.setText("")
+
+    def update_address(self, index):
+        browser = self.current_browser()
+
+        if browser:
+            self.update_url(browser.url(), browser)
+
+    def navigate(self):
+        text = self.address_bar.text().strip()
+
         if not text:
             return
 
-        if "." not in text and not text.startswith("localhost"):
-            text = "https://www.google.com/search?q=" + text
-        elif not text.startswith("http://") and not text.startswith("https://"):
-            text = "https://" + text
+        if text.startswith(("http://", "https://")):
+            url = text
 
-        if self.current_browser():
-            self.current_browser().setUrl(QUrl(text))
+        elif " " not in text and (
+            "." in text or text.startswith("localhost")
+        ):
+            url = "https://" + text
 
-    def open_bookmark(self, url_str):
-        if self.current_browser():
-            self.current_browser().setUrl(QUrl(url_str))
+        else:
+            url = (
+                "https://www.google.com/search?q="
+                + quote_plus(text)
+            )
 
-    def go_home(self):
-        if self.current_browser():
-            self.current_browser().setUrl(QUrl("https://www.google.com"))
+        self.open_url(url)
 
-    def zoom_page(self, delta):
+    def open_url(self, url):
+        browser = self.current_browser()
+
+        if browser:
+            browser.setUrl(QUrl(url))
+
+    def go_back(self):
         browser = self.current_browser()
         if browser:
-            browser.setZoomFactor(max(0.2, browser.zoomFactor() + delta))
+            browser.back()
+
+    def go_forward(self):
+        browser = self.current_browser()
+        if browser:
+            browser.forward()
+
+    def reload_page(self):
+        browser = self.current_browser()
+        if browser:
+            browser.reload()
+
+    def go_home(self):
+        self.open_url("https://www.google.com")
+
+    def zoom_in(self):
+        browser = self.current_browser()
+        if browser:
+            zoom = min(browser.zoomFactor() + 0.1, 3.0)
+            browser.setZoomFactor(zoom)
+
+    def zoom_out(self):
+        browser = self.current_browser()
+        if browser:
+            zoom = max(browser.zoomFactor() - 0.1, 0.5)
+            browser.setZoomFactor(zoom)
+
+    def close_tab(self, index):
+        if self.tabs.count() > 1:
+            widget = self.tabs.widget(index)
+            self.tabs.removeTab(index)
+            widget.deleteLater()
+
+    def close_current_tab(self):
+        self.close_tab(self.tabs.currentIndex())
 
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
+
     window = VortexBrowser()
     window.show()
-    window.raise_()
-    window.activateWindow()
+
     sys.exit(app.exec_())
